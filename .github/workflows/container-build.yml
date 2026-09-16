@@ -6,7 +6,7 @@ on:
     tags: ['v*']
 
 env:
-  IMAGE: ghcr.io/${{ toLowerCase(github.repository) }}
+  IMAGE: ghcr.io/${{ toLower(github.repository) }}
 
 permissions:
   packages: write
