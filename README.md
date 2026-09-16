@@ -8,10 +8,15 @@ The default workflow builds and pushes a multi-arch (amd64 + arm64) container im
 
 ### How it is triggered
 
-The workflow runs on:
-- **Push to `main`** — builds and tags with the commit SHA and `latest`.
-- **Push of a `v*` tag** — additionally tags with the semver version (e.g. `v1.2.3` → `1.2.3`).
-- **Pull request targeting `main`** — builds only (no push or manifest merge), to validate images before merging.
+The workflow runs on these events, with different behavior per event:
+
+| Event | `build` job | `manifest` job | Published tags |
+|-------|-------------|----------------|----------------|
+| **push to `main`** | builds amd64 + arm64, pushes per-arch images, writes GHA cache | merges per-arch images into multi-arch manifest lists | `latest`, commit SHA |
+| **push of a `v*` tag** | same as above | same as above | semver version (e.g. `v1.2.3` → `1.2.3`), commit SHA, `latest` |
+| **pull request targeting `main`** | builds amd64 + arm64, **no push**, **no cache write** | **skipped** | none |
+
+On pull requests the push step is disabled (`push: false`) and the cache is read-only — the goal is purely to validate that both architectures build correctly before merging.
 
 Action versions are kept up to date by Dependabot (`.github/dependabot.yml`, weekly updates).
 
