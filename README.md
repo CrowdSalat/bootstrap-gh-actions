@@ -11,6 +11,9 @@ The default workflow builds and pushes a multi-arch (amd64 + arm64) container im
 The workflow runs on:
 - **Push to `main`** — builds and tags with the commit SHA and `latest`.
 - **Push of a `v*` tag** — additionally tags with the semver version (e.g. `v1.2.3` → `1.2.3`).
+- **Pull request targeting `main`** — builds only (no push or manifest merge), to validate images before merging.
+
+Action versions are kept up to date by Dependabot (`.github/dependabot.yml`, weekly updates).
 
 ### What is built
 
