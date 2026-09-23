@@ -1,0 +1,7 @@
+FROM quay.io/centos-bootc/centos-bootc:stream10
+
+RUN dnf -y install cloud-init podman && \
+    ln -s ../cloud-init.target /usr/lib/systemd/system/default.target.wants && \
+    dnf clean all
+
+COPY 99-default-user.cfg /etc/cloud/cloud.cfg.d/99-default-user.cfg

@@ -1,0 +1,110 @@
+name: Image Mode qcow2 (bootc)
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Tag for the bootc image and baked qcow2 (defaults to stream10-<date>)
+        required: false
+        default: ''
+
+permissions:
+  packages: write
+
+jobs:
+  build-qcow2:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Set GHCR image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - name: Resolve bootc image tag
+        run: |
+          IMAGE_TAG="${{ inputs.image_tag }}"
+          if [[ -z "${IMAGE_TAG}" ]]; then IMAGE_TAG="stream10-$(date -u +%Y%m%d)"; fi
+          echo "BOOTC_TAG=${IMAGE_TAG}" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push bootc image
+        uses: docker/build-push-action@v6
+        with:
+          context: image-bootc
+          file: image-bootc/Containerfile
+          platforms: ${{ matrix.platform }}
+          push: true
+          tags: ${{ env.IMAGE }}:bootc-${{ env.BOOTC_TAG }}-${{ matrix.arch }}
+
+      - name: Install qemu-utils for verification
+        run: sudo apt-get update && sudo apt-get install -y qemu-utils
+
+      - name: Login to GHCR (root podman)
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | sudo podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Pull bootc image into root container storage
+        run: sudo podman pull --platform "${{ matrix.platform }}" "${{ env.IMAGE }}:bootc-${{ env.BOOTC_TAG }}-${{ matrix.arch }}"
+
+      - name: Build qcow2 with bootc-image-builder
+        run: |
+          mkdir -p output
+          sudo podman run --rm --privileged --pull=newer \
+            --security-opt label=type:unconfined_t \
+            -v "$PWD/output:/output" \
+            -v /var/lib/containers/storage:/var/lib/containers/storage \
+            quay.io/centos-bootc/bootc-image-builder:latest \
+            --type qcow2 --rootfs xfs --chown "$(id -u):$(id -g)" \
+            "${{ env.IMAGE }}:bootc-${{ env.BOOTC_TAG }}-${{ matrix.arch }}"
+
+      - name: Verify disk image
+        run: qemu-img info output/qcow2/disk.qcow2
+
+      - name: Upload qcow2
+        uses: actions/upload-artifact@v4
+        with:
+          name: disk-qcow2-${{ matrix.arch }}
+          path: output/qcow2/disk.qcow2
+          retention-days: 14
+
+  manifest:
+    needs: build-qcow2
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set GHCR image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - name: Resolve bootc image tag
+        run: |
+          IMAGE_TAG="${{ inputs.image_tag }}"
+          if [[ -z "${IMAGE_TAG}" ]]; then IMAGE_TAG="stream10-$(date -u +%Y%m%d)"; fi
+          echo "BOOTC_TAG=${IMAGE_TAG}" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create multi-arch bootc manifest
+        run: |
+          docker buildx imagetools create \
+            --tag "${{ env.IMAGE }}:bootc-${{ env.BOOTC_TAG }}" \
+            "${{ env.IMAGE }}:bootc-${{ env.BOOTC_TAG }}-amd64" \
+            "${{ env.IMAGE }}:bootc-${{ env.BOOTC_TAG }}-arm64"

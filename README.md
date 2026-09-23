@@ -24,6 +24,16 @@ Action versions are kept up to date by Dependabot (`.github/dependabot.yml`, wee
 
 A small Go binary that prints its own architecture — used to validate that the multi-arch pipeline produces the correct image on each platform.
 
+## RHEL Image Mode qcow2 (bootc)
+
+The `image-bootc-qcow2` workflow builds a RHEL Image Mode (bootc) container from `image-bootc/Containerfile` and converts it to a qcow2 disk image with `bootc-image-builder`.
+
+- **Trigger:** manual (`workflow_dispatch`) only, to avoid a tag touching several workflows in this shared repo. Optional `image_tag` input; defaults to `stream10-<date>`.
+- **Architecture:** two native lanes — `ubuntu-latest` → amd64, `ubuntu-24.04-arm` → arm64 — mirroring the container build above.
+- **Flow per lane:** build + push the bootc container to GHCR → `podman pull` into root storage → `bootc-image-builder --type qcow2 --rootfs xfs` → `qemu-img info` check → upload `disk-qcow2-<arch>` artifact.
+- **Base image:** `quay.io/centos-bootc/centos-bootc:stream10` (no Red Hat subscription needed), with cloud-init installed and an `opc` default user via `99-default-user.cfg` (copied from the `homelab/oracle-vls/image-bootc` experiment).
+- **Images on GHCR:** per-arch pushed as `bootc-<tag>-<arch>`, then the `manifest` job merges them into a multi-arch `bootc-<tag>` tag.
+
 ### Registry
 
 Images are pushed to GHCR using the repository path:
