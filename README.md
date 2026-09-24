@@ -26,13 +26,62 @@ A small Go binary that prints its own architecture — used to validate that the
 
 ## RHEL Image Mode qcow2 (bootc)
 
-The `image-bootc-qcow2` workflow builds a RHEL Image Mode (bootc) container from `image-bootc/Containerfile` and converts it to a qcow2 disk image with `bootc-image-builder`.
+The `image-bootc-qcow2` workflow builds an RHEL Image Mode (bootc) container from `image-bootc/Containerfile` and converts it into a bootable **qcow2 disk image** with `bootc-image-builder` — for **both amd64 and arm64**, on native runners.
 
-- **Trigger:** manual (`workflow_dispatch`) only, to avoid a tag touching several workflows in this shared repo. Optional `image_tag` input; defaults to `stream10-<date>`.
-- **Architecture:** two native lanes — `ubuntu-latest` → amd64, `ubuntu-24.04-arm` → arm64 — mirroring the container build above.
+- **Base image:** `quay.io/centos-bootc/centos-bootc:stream10` (no Red Hat subscription needed), with cloud-init installed and an `opc` default user via `99-default-user.cfg` (adapted from the `homelab/oracle-vls/image-bootc` experiment).
+- **Architecture:** two lanes — `ubuntu-24.04` → amd64, `ubuntu-24.04-arm` → arm64.
 - **Flow per lane:** build + push the bootc container to GHCR → `podman pull` into root storage → `bootc-image-builder --type qcow2 --rootfs xfs` → `qemu-img info` check → upload `disk-qcow2-<arch>` artifact.
-- **Base image:** `quay.io/centos-bootc/centos-bootc:stream10` (no Red Hat subscription needed), with cloud-init installed and an `opc` default user via `99-default-user.cfg` (copied from the `homelab/oracle-vls/image-bootc` experiment).
 - **Images on GHCR:** per-arch pushed as `bootc-<tag>-<arch>`, then the `manifest` job merges them into a multi-arch `bootc-<tag>` tag.
+
+### How to trigger
+
+Manual only (`workflow_dispatch`) — deliberately *not* tied to pushes or tags, so a tag never sets off several workflows in this shared repo.
+
+Via the web UI:
+**Actions → *Image Mode qcow2 (bootc)* → *Run workflow*** → set *image tag* (optional) → *Run workflow*.
+
+Via the CLI:
+
+```bash
+gh workflow run image-bootc-qcow2.yml --field image_tag=stream10-20260924
+gh run watch # or: gh run list --workflow=image-bootc-qcow2.yml
+```
+
+The `image_tag` input names both the GHCR tag and the tag baked into the disk image. Leave it empty to use `stream10-<date>` (UTC). The tag itself has no meaning to the OS — it only labels the bootc container — the image content always matches the current `image-bootc/Containerfile`.
+
+Triggering twice on the same day pushes to the same GHCR tag (overwrite); artifacts get a new run id each time.
+
+### What you get
+
+Two workflow artifacts (GHCR packages are the bootc container, not the disk):
+
+| Artifact | Content |
+|----------|---------|
+| `disk-qcow2-amd64` | `disk.qcow2` — 10 GiB virtual, qcow2, `xfs` rootfs, cloud-init `opc` user |
+| `disk-qcow2-arm64` | same, for arm64 |
+
+### How to download
+
+Via the web UI: open the run → **Artifacts** section (right-hand column) → `disk-qcow2-<arch>`.
+
+Via the CLI (artifacts expire after 14 days):
+
+```bash
+gh run download <run-id> --pattern 'disk-qcow2-*' -D ~/downloads
+gh run download <run-id> -n disk-qcow2-arm64 -D ~/downloads   # single arch
+```
+
+Each artifact is a zip containing `disk.qcow2`. Boot it on a machine/VPS matching the architecture, e.g. with the OCI image-bootc setup: attach the cloud-init-capable disk and let it create the `opc` user on first boot.
+
+### The bootc container on GHCR
+
+The disk images are built from `ghcr.io/crowdsalat/bootstrap-gh-actions:bootc-<tag>[-<arch>]`:
+
+```bash
+podman pull ghcr.io/crowdsalat/bootstrap-gh-actions:bootc-stream10-20260924
+podman run --rm --pull=never --entrypoint /usr/bin/bootc \
+  ghcr.io/crowdsalat/bootstrap-gh-actions:bootc-stream10-20260924 status
+```
 
 ### Registry
 
@@ -53,7 +102,7 @@ With the following tag scheme:
 
 Both architectures are built in parallel on **native runners** (no QEMU emulation):
 
-- `ubuntu-latest` → `linux/amd64`
+- `ubuntu-24.04` → `linux/amd64`
 - `ubuntu-24.04-arm` → `linux/arm64`
 
 Each runner pushes a per-arch image. A final `manifest` job then uses `docker buildx imagetools create` to assemble a single multi-arch manifest list for each tag.
